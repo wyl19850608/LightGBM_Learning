@@ -1,0 +1,263 @@
+{
+    "categorical_features": [
+        "gender_cd",
+        "ocr_ethnic",
+        "residence_pr_cd",
+        "residence_city_cd",
+        "residence_area_cd",
+        "census_pr_cd",
+        "census_city_cd",
+        "census_area_cd",
+        "occ_cd",
+        "first_biz_name",
+        "second_biz_name",
+        "third_biz_name",
+        "db_src",
+        "prod_cd",
+        "cust_gp_code",
+        "cust_gp_name",
+        "touch_name",
+        "touch_id",
+        "touch_type",
+        "channel_name",
+        "channel_id",
+        "plan_id",
+        "plan_name",
+        "channel_task_id",
+        "subscribe_no",
+        "decision_id",
+        "decision_name",
+        "tel_call_type",
+        "touch_status",
+        "click_status"
+    ],
+    "continuous_features": {
+        "age": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "pril_bal": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "crdt_lim_yx": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "avail_bal_cash": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "total_loan_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "total_loan_amt": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "apply_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "apply_amt": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "wdraw_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt": {
+            "n_bins": 10,
+            "strategy": "quantile"
+        },
+        "lim_use_rate": {
+            "n_bins": 10,
+            "strategy": "uniform"
+        },
+        "push_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile"
+        },
+        "sms_charge_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile"
+        },
+        "tel_call_dur": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "tel_call_inav_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile"
+        },
+        "delay_days": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t0": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t3": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t7": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t10": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t14": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t15": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        },
+        "wdraw_amt_t30": {
+            "n_bins": 8,
+            "strategy": "quantile"
+        }
+    },
+    "bool_features": [
+        "is_coupon_issue",
+        "is_credit",
+        "is_apply",
+        "is_wdraw",
+        "is_login",
+        "if_bj_10_yn",
+        "if_bj_30_yn"
+    ],
+    "label_encoders": [
+        "gender_cd",
+        "ocr_ethnic",
+        "residence_pr_cd",
+        "residence_city_cd",
+        "residence_area_cd",
+        "census_pr_cd",
+        "census_city_cd",
+        "census_area_cd",
+        "occ_cd",
+        "first_biz_name",
+        "second_biz_name",
+        "third_biz_name",
+        "db_src",
+        "prod_cd",
+        "cust_gp_code",
+        "cust_gp_name",
+        "touch_name",
+        "touch_id",
+        "touch_type",
+        "channel_name",
+        "channel_id",
+        "plan_id",
+        "plan_name",
+        "channel_task_id",
+        "subscribe_no",
+        "decision_id",
+        "decision_name",
+        "tel_call_type",
+        "touch_status",
+        "click_status",
+        "is_coupon_issue",
+        "is_credit",
+        "is_apply",
+        "is_wdraw",
+        "is_login",
+        "if_bj_10_yn",
+        "if_bj_30_yn"
+    ],
+    "bin_discretizers": [
+        "age",
+        "pril_bal",
+        "crdt_lim_yx",
+        "avail_bal_cash",
+        "total_loan_cnt",
+        "total_loan_amt",
+        "apply_cnt",
+        "apply_amt",
+        "wdraw_cnt",
+        "wdraw_amt",
+        "lim_use_rate",
+        "push_cnt",
+        "sms_charge_cnt",
+        "tel_call_dur",
+        "tel_call_inav_cnt",
+        "delay_days",
+        "wdraw_amt_t0",
+        "wdraw_amt_t3",
+        "wdraw_amt_t7",
+        "wdraw_amt_t10",
+        "wdraw_amt_t14",
+        "wdraw_amt_t15",
+        "wdraw_amt_t30"
+    ],
+    "feature_sizes": {
+        "gender_cd": 4,
+        "ocr_ethnic": 9,
+        "residence_pr_cd": 72,
+        "residence_city_cd": 71,
+        "residence_area_cd": 497,
+        "census_pr_cd": 72,
+        "census_city_cd": 71,
+        "census_area_cd": 495,
+        "occ_cd": 17,
+        "first_biz_name": 5,
+        "second_biz_name": 5,
+        "third_biz_name": 5,
+        "db_src": 5,
+        "prod_cd": 50,
+        "cust_gp_code": 30,
+        "cust_gp_name": 6,
+        "touch_name": 20,
+        "touch_id": 906,
+        "touch_type": 5,
+        "channel_name": 5,
+        "channel_id": 20,
+        "plan_id": 874,
+        "plan_name": 50,
+        "channel_task_id": 909,
+        "subscribe_no": 835,
+        "decision_id": 900,
+        "decision_name": 5,
+        "tel_call_type": 6,
+        "touch_status": 4,
+        "click_status": 3,
+        "age": 10,
+        "pril_bal": 10,
+        "crdt_lim_yx": 10,
+        "avail_bal_cash": 10,
+        "total_loan_cnt": 8,
+        "total_loan_amt": 10,
+        "apply_cnt": 8,
+        "apply_amt": 10,
+        "wdraw_cnt": 8,
+        "wdraw_amt": 10,
+        "lim_use_rate": 10,
+        "push_cnt": 5,
+        "sms_charge_cnt": 5,
+        "tel_call_dur": 8,
+        "tel_call_inav_cnt": 5,
+        "delay_days": 8,
+        "wdraw_amt_t0": 8,
+        "wdraw_amt_t3": 8,
+        "wdraw_amt_t7": 8,
+        "wdraw_amt_t10": 8,
+        "wdraw_amt_t14": 8,
+        "wdraw_amt_t15": 8,
+        "wdraw_amt_t30": 8,
+        "is_coupon_issue": 3,
+        "is_credit": 3,
+        "is_apply": 3,
+        "is_wdraw": 3,
+        "is_login": 3,
+        "if_bj_10_yn": 3,
+        "if_bj_30_yn": 3
+    }
+}

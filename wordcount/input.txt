@@ -1,0 +1,43 @@
+from pyspark import SparkContext, SparkConf
+
+def word_count():
+    # 配置并初始化SparkContext
+    conf = SparkConf().setAppName("WordCountWithOperators")
+    sc = SparkContext(conf=conf)
+
+    # 1. 读取文本文件，生成初始RDD
+    # 支持本地文件（file:///路径）或HDFS文件（hdfs:///路径）
+    lines = sc.textFile("input.txt")
+
+    # 2. 转换操作：一系列算子组合
+    word_counts = lines \
+        # 过滤空行
+    .filter(lambda line: line.strip() != "") \
+        # 将每行文本按空格分割为单词列表
+    .flatMap(lambda line: line.split()) \
+        # 清洗单词：转为小写并去除标点符号
+    .map(lambda word: word.strip().lower().strip('.,!?;:"()[]')) \
+        # 过滤清洗后为空的字符串
+    .filter(lambda word: word != "") \
+        # 每个单词映射为(word, 1)键值对
+    .map(lambda word: (word, 1)) \
+        # 按单词分组，累加计数（reduceByKey是核心聚合算子）
+    .reduceByKey(lambda a, b: a + b) \
+        # 按计数降序排序
+    .sortBy(lambda x: x[1], ascending=False)
+
+# 3. 行动操作：获取并输出结果
+results = word_counts.collect()  # 将分布式计算结果收集到Driver端
+
+# 打印前100个结果
+for word, count in results[:100]:
+    print(f"{word}: {count}")
+
+# 可选：将结果保存到文件
+word_counts.saveAsTextFile("output_wordcount_rdd")
+
+# 停止SparkContext
+sc.stop()
+
+if __name__ == "__main__":
+    word_count()

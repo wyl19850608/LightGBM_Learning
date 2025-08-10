@@ -199,12 +199,12 @@
         "wdraw_amt_t30"
     ],
     "feature_sizes": {
-        "gender_cd": 4,
+        "gender_cd": 5,
         "ocr_ethnic": 9,
-        "residence_pr_cd": 72,
+        "residence_pr_cd": 73,
         "residence_city_cd": 71,
         "residence_area_cd": 497,
-        "census_pr_cd": 72,
+        "census_pr_cd": 73,
         "census_city_cd": 71,
         "census_area_cd": 495,
         "occ_cd": 17,
@@ -252,12 +252,312 @@
         "wdraw_amt_t14": 8,
         "wdraw_amt_t15": 8,
         "wdraw_amt_t30": 8,
-        "is_coupon_issue": 3,
-        "is_credit": 3,
-        "is_apply": 3,
-        "is_wdraw": 3,
-        "is_login": 3,
-        "if_bj_10_yn": 3,
-        "if_bj_30_yn": 3
+        "is_coupon_issue": 4,
+        "is_credit": 4,
+        "is_apply": 4,
+        "is_wdraw": 4,
+        "is_login": 4,
+        "if_bj_10_yn": 4,
+        "if_bj_30_yn": 4
+    },
+    "bin_rules": {
+        "age": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                18.0,
+                22.0,
+                27.0,
+                32.0,
+                38.0,
+                42.0,
+                46.0,
+                51.0,
+                55.0,
+                60.0,
+                64.0
+            ]
+        },
+        "pril_bal": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                26.97,
+                439.31600000000003,
+                803.0680000000001,
+                1335.8529999999998,
+                1898.6240000000003,
+                2862.5,
+                4061.5839999999994,
+                6120.497,
+                10011.452000000003,
+                19974.056000000004,
+                386253.09
+            ]
+        },
+        "crdt_lim_yx": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                133.78,
+                1583.9370000000001,
+                2924.2860000000005,
+                4227.692,
+                6079.918,
+                7897.035,
+                10737.902,
+                14700.756999999998,
+                20723.214000000004,
+                33076.119000000006,
+                463325.44
+            ]
+        },
+        "avail_bal_cash": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1626.614,
+                3451.87,
+                6209.924,
+                10492.167,
+                16194.252,
+                28604.586000000003,
+                439062.1
+            ]
+        },
+        "total_loan_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                3.0,
+                5.0,
+                8.0,
+                10.0,
+                12.0,
+                14.0,
+                17.0,
+                19.0
+            ]
+        },
+        "total_loan_amt": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1923.0460000000007,
+                4507.832,
+                7913.395999999999,
+                13179.74,
+                21113.63,
+                31048.014,
+                47752.21799999999,
+                76378.54400000001,
+                139102.951,
+                7680522.04
+            ]
+        },
+        "apply_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1.0,
+                2.0,
+                3.0,
+                5.0,
+                6.0,
+                7.0,
+                8.0,
+                9.0
+            ]
+        },
+        "apply_amt": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1760.278,
+                3163.384,
+                4622.508,
+                6554.745000000001,
+                8960.18,
+                12948.064999999995,
+                19209.170000000013,
+                34105.590000000004,
+                340993.14
+            ]
+        },
+        "wdraw_cnt": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1.0,
+                2.0,
+                3.0,
+                5.0,
+                6.0,
+                9.0
+            ]
+        },
+        "wdraw_amt": {
+            "n_bins": 10,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1267.33,
+                2270.1620000000003,
+                3487.585,
+                4947.778,
+                8191.9959999999965,
+                12466.850000000006,
+                22589.04,
+                253020.09
+            ]
+        },
+        "lim_use_rate": {
+            "n_bins": 10,
+            "strategy": "uniform",
+            "bin_edges": [
+                0.0,
+                30.898590000000002,
+                61.797180000000004,
+                92.69577000000001,
+                123.59436000000001,
+                154.49295,
+                185.39154000000002,
+                216.29013,
+                247.18872000000002,
+                278.08731,
+                308.9859
+            ]
+        },
+        "push_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                2.0,
+                4.0,
+                5.0,
+                7.0,
+                9.0
+            ]
+        },
+        "sms_charge_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1.0,
+                2.0,
+                3.0,
+                4.0
+            ]
+        },
+        "tel_call_dur": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                63.75,
+                114.0,
+                132.0,
+                143.0,
+                202.0,
+                251.0,
+                299.0
+            ]
+        },
+        "tel_call_inav_cnt": {
+            "n_bins": 5,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1.0,
+                4.0,
+                7.0,
+                9.0
+            ]
+        },
+        "delay_days": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                1.0,
+                3.0,
+                6.0,
+                7.0,
+                8.0,
+                10.0,
+                12.0,
+                14.0
+            ]
+        },
+        "wdraw_amt_t0": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                30559.06
+            ]
+        },
+        "wdraw_amt_t3": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                107298.31
+            ]
+        },
+        "wdraw_amt_t7": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                161038.16
+            ]
+        },
+        "wdraw_amt_t10": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                25205.86
+            ]
+        },
+        "wdraw_amt_t14": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                212703.5
+            ]
+        },
+        "wdraw_amt_t15": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                241303.35
+            ]
+        },
+        "wdraw_amt_t30": {
+            "n_bins": 8,
+            "strategy": "quantile",
+            "bin_edges": [
+                0.0,
+                682.2650000000001,
+                2021.06125,
+                3423.545,
+                5340.18625,
+                9674.16,
+                18295.08875,
+                253020.09
+            ]
+        }
     }
 }

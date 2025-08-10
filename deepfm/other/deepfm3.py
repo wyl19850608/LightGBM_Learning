@@ -1,0 +1,958 @@
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import Dataset, DataLoader
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import (roc_auc_score, f1_score, accuracy_score,
+                             precision_score, recall_score,
+                             confusion_matrix, precision_recall_curve, auc)
+import matplotlib.pyplot as plt
+import seaborn as sns
+from collections import Counter
+import time
+from datetime import datetime
+import json
+import warnings
+
+# 忽略警告信息
+warnings.filterwarnings('ignore')
+
+
+# 配置参数
+CONFIG = {
+    "test_size": 0.2,
+    "val_size": 0.2,
+    "batch_size": 256,
+    "epochs": 15,
+    "learning_rate": 1e-3,
+    "weight_decay": 1e-5,
+    "embed_dim": 32,
+    "mlp_layers": [256, 128, 64],
+    "dropout": 0.3,
+    # 特征列表
+    "numeric_features": [
+        'age', 'last_30d_tel_succ_cs', 'loss_model_ggroup_v3',
+        'risk_ms11_1_model_score', 'standard_score_group_v6_1',
+        'last_month_expire_coupon_cnt', 'number_of_gold_be_used',
+        'last_10d_lin_e_cnt', 'last_10d_gu_e_cnt',
+        'ayht10_all_respond_score', 'call_anss_score_t10',
+        'xyl_model_107', 'avail_cash', 'avg_limuse_rate',
+        'pril_bal', 'crdt_lim_yx', 'lim_use_rate', 'zaidai_ctrl_rate'
+    ],
+    "categorical_features": [
+        'yls_cust_type_v2', 'cust_types_01', 'cust_types_02',
+        'if_sms_yn', 'elec_types', 'igender_cd', 'icust_ty',
+        'if_500up_yn', 'is_login', 'sms_types', 'if_bj_30_yn',
+        'member_types', 'if_bj_10_yn'
+    ],
+    "label_col": "label",
+    "data_folder": "data",
+    # 缺失值处理策略
+    "numeric_missing_strategy": "mean",  # 选项: "mean", "median", "constant"
+    "numeric_fill_value": 0,
+    "categorical_missing_strategy": "constant",  # 选项: "mode", "constant"
+    "categorical_fill_value": "Missing",
+    # 不平衡处理配置
+    "imbalance_method": "both",  # 选项: 'weight', 'undersample', 'both'
+    "undersample_ratio": 3,  # 下采样的负正样本比例
+    # 阈值选择
+    "threshold_tuning": False,
+    "optimize_for": "f1",  # 选项: 'f1', 'precision', 'recall'
+    "positive_threshold": 0.5,
+    "min_threshold": 0.1,
+    "max_threshold": 0.9,
+    "min_pos_samples": 20,  # 每个数据集所需的最小正样本数
+    # 模型保存配置
+    "save_full_model": True,  # 是否保存完整模型
+    "save_checkpoints": True,  # 是否保存中间 checkpoint
+    "checkpoint_interval": 5  # 每隔多少个 epoch 保存一次 checkpoint
+}
+
+
+# 从文件夹加载数据
+def load_data_from_folder(folder_path):
+    """加载文件夹中所有CSV文件并合并为一个DataFrame"""
+    all_files = []
+
+    # 遍历文件夹中的所有文件
+    for file in os.listdir(folder_path):
+        if file.endswith(".csv"):
+            file_path = os.path.join(folder_path, file)
+            try:
+                df = pd.read_csv(file_path)
+                # 检查并添加features_list（原代码中缺少定义，这里补充默认处理）
+                if 'features_list' in CONFIG:
+                    if len(df.columns) == len(CONFIG['features_list']):
+                        df.columns = CONFIG['features_list']
+                all_files.append(df)
+                print(f"已加载 {file}，包含 {len(df)} 行数据")
+            except Exception as e:
+                print(f"加载 {file} 时出错: {str(e)}")
+
+    if not all_files:
+        raise ValueError(f"在 {folder_path} 中未找到CSV文件")
+
+    # 合并所有DataFrame
+    combined_df = pd.concat(all_files, axis=0, ignore_index=True)
+    print(f"\n合并后的数据集大小: {len(combined_df)} 行")
+    return combined_df
+
+
+# 处理缺失值
+def handle_missing_values(df, numeric_features, categorical_features):
+    """根据配置处理缺失值"""
+    df = df.copy()
+
+    # 处理数值型特征的缺失值
+    for col in numeric_features:
+        if col in df.columns and df[col].isnull().any():
+            if CONFIG["numeric_missing_strategy"] == "mean":
+                fill_value = df[col].mean()
+            elif CONFIG["numeric_missing_strategy"] == "median":
+                fill_value = df[col].median()
+            else:  # 常数填充
+                fill_value = CONFIG["numeric_fill_value"]
+            df[col] = df[col].fillna(fill_value)
+
+    # 处理分类型特征的缺失值
+    for col in categorical_features:
+        if col in df.columns and df[col].isnull().any():
+            if CONFIG["categorical_missing_strategy"] == "mode":
+                fill_value = df[col].mode()[0]
+            else:  # 常数填充
+                fill_value = CONFIG["categorical_fill_value"]
+            df[col] = df[col].fillna(fill_value)
+
+    return df
+
+
+# 下采样函数
+def undersample_data(df, label_col, ratio=5):
+    """对多数类进行下采样"""
+    pos_df = df[df[label_col] == 1]
+    neg_df = df[df[label_col] == 0]
+    n_pos = len(pos_df)
+    n_neg = min(len(neg_df), n_pos * ratio)
+    neg_sample = neg_df.sample(n_neg, random_state=42)
+    balanced_df = pd.concat([pos_df, neg_sample], axis=0).sample(frac=1, random_state=42)
+    return balanced_df
+
+
+# 计算详细指标
+def calculate_detailed_metrics(y_true, y_pred_proba, threshold=0.5):
+    """计算详细指标，包括每个类别的统计信息"""
+    # 转换为分类预测结果
+    y_pred = (y_pred_proba >= threshold).astype(int)
+
+    # 整体指标
+    acc = accuracy_score(y_true, y_pred)
+    roc_auc = roc_auc_score(y_true, y_pred_proba)
+    f1 = f1_score(y_true, y_pred)
+
+    # 计算两个类别的精确率和召回率
+    precision_neg = precision_score(y_true, y_pred, pos_label=0)
+    recall_neg = recall_score(y_true, y_pred, pos_label=0)
+    f1_neg = f1_score(y_true, y_pred, pos_label=0)
+
+    precision_pos = precision_score(y_true, y_pred)
+    recall_pos = recall_score(y_true, y_pred)
+    f1_pos = f1_score(y_true, y_pred)
+
+    # 类别计数
+    count_pos = sum(y_true)
+    count_neg = len(y_true) - count_pos
+
+    # 计算PR曲线下面积
+    precision_curve, recall_curve, _ = precision_recall_curve(y_true, y_pred_proba)
+    aucpr = auc(recall_curve, precision_curve)
+
+    # 构建结果字典
+    metrics = {
+        'overall': {
+            "accuracy": acc,
+            "roc_auc": roc_auc,
+            "auc_pr": aucpr,
+            "f1_score": f1
+        },
+        'positive': {
+            "precision": precision_pos,
+            "recall": recall_pos,
+            "f1": f1_pos,
+            "support": count_pos
+        },
+        'negative': {
+            "precision": precision_neg,
+            "recall": recall_neg,
+            "f1": f1_neg,
+            "support": count_neg
+        },
+        "threshold": threshold
+    }
+
+    return metrics
+
+
+# 打印详细指标
+def print_detailed_metrics(metrics, dataset_name):
+    """打印详细的分类指标
+    Args:
+        metrics (dict): 包含评估指标的字典
+        dataset_name (str): 数据集名称（用于标题显示）
+    """
+    # 打印标题
+    title = f"{dataset_name} 数据集指标"
+    print("\n" + "=" * 70)
+    print(title.center(70))
+    print("=" * 70)
+
+    # 整体指标
+    print("\n整体指标:")
+    print(f"  准确率: {metrics['overall']['accuracy']:.4f}")
+    print(f"  ROC曲线下面积: {metrics['overall']['roc_auc']:.4f}")
+    print(f"  PR曲线下面积: {metrics['overall']['auc_pr']:.4f}")
+    print(f"  F1分数: {metrics['overall']['f1_score']:.4f}")
+    print(f"  预测阈值: {metrics['threshold']:.4f}")
+
+    # 正样本指标
+    print("\n正样本(少数类)指标:")
+    print(f"  精确率: {metrics['positive']['precision']:.4f}")
+    print(f"  召回率: {metrics['positive']['recall']:.4f}")
+    print(f"  F1分数: {metrics['positive']['f1']:.4f}")
+    print(f"  样本数: {metrics['positive']['support']}")
+
+    # 负样本指标
+    print("\n负样本(多数类)指标:")
+    print(f"  精确率: {metrics['negative']['precision']:.4f}")
+    print(f"  召回率: {metrics['negative']['recall']:.4f}")
+    print(f"  F1分数: {metrics['negative']['f1']:.4f}")
+    print(f"  样本数: {metrics['negative']['support']}")
+
+    # 底部装饰线
+    print("=" * 70 + "\n")
+    return metrics
+
+
+# 保存结果
+def save_results(trainer, config, test_metrics, results_dir=None):
+    """将所有训练结果保存到文件"""
+    # 创建结果目录
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if results_dir is None:
+        results_dir = f"results_{timestamp}"
+    os.makedirs(results_dir, exist_ok=True)
+
+    # 1. 保存配置文件
+    with open(os.path.join(results_dir, "config.json"), "w") as f:
+        json.dump(config, f, indent=4)
+
+    # 2. 保存训练历史
+    train_history = []
+    for i, metrics in enumerate(trainer.train_metrics_history):
+        epoch_data = {
+            "epoch": i + 1,
+            "train_loss": trainer.train_loss_history[i] if i < len(trainer.train_loss_history) else None,
+            "train_accuracy": metrics["overall"]["accuracy"],
+            "train_auc_pr": metrics["overall"]["auc_pr"],
+            "train_f1": metrics["overall"]["f1_score"],
+            "val_accuracy": trainer.val_metrics_history[i]["overall"]["accuracy"],
+            "val_auc_pr": trainer.val_metrics_history[i]["overall"]["auc_pr"],
+            "val_f1": trainer.val_metrics_history[i]["overall"]["f1_score"]
+        }
+        train_history.append(epoch_data)
+
+    pd.DataFrame(train_history).to_csv(os.path.join(results_dir, "training_history.csv"), index=False)
+
+    # 3. 保存最佳模型（状态字典和完整模型）
+    torch.save(trainer.best_model_state, os.path.join(results_dir, "best_model_state.pth"))
+    if config["save_full_model"] and trainer.best_model is not None:
+        torch.save(trainer.best_model, os.path.join(results_dir, "best_model_full.pth"))
+
+    # 4. 保存最终模型（状态字典和完整模型）
+    torch.save(trainer.model.state_dict(), os.path.join(results_dir, "final_model_state.pth"))
+    if config["save_full_model"]:
+        torch.save(trainer.model, os.path.join(results_dir, "final_model_full.pth"))
+
+    # 5. 保存测试结果
+    test_results = {
+        "test_accuracy": test_metrics["overall"]["accuracy"],
+        "test_auc_pr": test_metrics["overall"]["auc_pr"],
+        "test_f1": test_metrics["overall"]["f1_score"],
+        "test_threshold": test_metrics["threshold"],
+        "positive_precision": test_metrics["positive"]["precision"],
+        "positive_recall": test_metrics["positive"]["recall"],
+        "positive_f1": test_metrics["positive"]["f1"],
+        "negative_precision": test_metrics["negative"]["precision"],
+        "negative_recall": test_metrics["negative"]["recall"],
+        "negative_f1": test_metrics["negative"]["f1"],
+        "best_val_auc_pr": trainer.best_auc,
+        "best_threshold": trainer.best_threshold
+    }
+
+    with open(os.path.join(results_dir, "test_results.json"), "w") as f:
+        json.dump(test_results, f, indent=4)
+
+    # 6. 保存混淆矩阵
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(trainer.test_confusion_matrix, annot=True, fmt='d', cmap='Blues',
+                xticklabels=['负样本', '正样本'],
+                yticklabels=['负样本', '正样本'])
+    plt.title('测试集混淆矩阵')
+    plt.xlabel('预测标签')
+    plt.ylabel('真实标签')
+    plt.tight_layout()
+    plt.savefig(os.path.join(results_dir, 'confusion_matrix.png'), dpi=300)
+    plt.close()
+
+    return results_dir
+
+
+# 保存检查点
+def save_checkpoint(model, optimizer, epoch, metrics, results_dir, config):
+    """保存训练过程中的检查点"""
+    checkpoint = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'metrics': metrics
+    }
+
+    # 保存状态字典
+    torch.save(checkpoint, os.path.join(results_dir, f"checkpoint_epoch_{epoch}.pth"))
+
+    # 如果配置了保存完整模型，也保存完整模型
+    if config["save_full_model"]:
+        torch.save(model, os.path.join(results_dir, f"model_epoch_{epoch}_full.pth"))
+
+    print(f"已保存第 {epoch} 轮检查点")
+
+
+# DeepFM数据集类
+class DeepFMDataset(Dataset):
+    def __init__(self, df, numeric_features, categorical_features, label_col, encoders=None, is_train=True):
+        self.df = df.copy().reset_index(drop=True)
+        self.numeric_features = numeric_features
+        self.categorical_features = categorical_features
+        self.label_col = label_col
+        self.is_train = is_train
+
+        # 处理缺失值
+        self.df = handle_missing_values(self.df, numeric_features, categorical_features)
+
+        # 处理分类型特征
+        self.categorical_encoders = {} if encoders is None else encoders
+        self.categorical_dims = {}
+        self._encode_categorical()
+
+    def _encode_categorical(self):
+        for col in self.categorical_features:
+            if col in self.df.columns:  # 确保列存在
+                if self.is_train or col not in self.categorical_encoders:
+                    le = LabelEncoder()
+                    self.df[col] = le.fit_transform(self.df[col].astype(str))
+                    self.categorical_encoders[col] = le
+                else:
+                    le = self.categorical_encoders[col]
+                    # 处理未见过的类别 - 映射到特殊值
+                    self.df[col] = self.df[col].apply(lambda x: x if x in le.classes_ else 'UNKNOWN')
+                    # 如果'UNKNOWN'不在编码器类别中，则添加
+                    if 'UNKNOWN' not in le.classes_:
+                        le.classes_ = np.append(le.classes_, 'UNKNOWN')
+                    self.df[col] = le.transform(self.df[col].astype(str))
+
+                self.categorical_dims[col] = len(le.classes_)
+
+        return self.categorical_encoders
+
+    def __len__(self):
+        return len(self.df)
+
+    def __getitem__(self, idx):
+        # 数值特征
+        numeric_data = self.df[self.numeric_features].iloc[idx].values if self.numeric_features else np.array([])
+        numeric_tensor = torch.tensor(numeric_data.astype(np.float32), dtype=torch.float32)
+
+        # 分类特征
+        categorical_data = []
+        for col in self.categorical_features:
+            if col in self.df.columns:
+                categorical_data.append(self.df.loc[idx, col])
+            else:
+                categorical_data.append(0)  # 默认值
+
+        categorical_tensor = torch.tensor(categorical_data, dtype=torch.long)
+
+        # 标签
+        label = torch.tensor(self.df.loc[idx, self.label_col], dtype=torch.float32)
+
+        return {
+            'numeric': numeric_tensor,
+            'categorical': categorical_tensor,
+            'label': label
+        }
+
+
+# DeepFM模型
+class DeepFM(nn.Module):
+    def __init__(self, numeric_dim, categorical_dims, embed_dim=32, mlp_layers=[256, 128, 64], dropout=0.3):
+        super().__init__()
+
+        # 确保有数值特征或分类特征
+        self.has_numeric = numeric_dim > 0
+        self.has_categorical = len(categorical_dims) > 0
+
+        # ========== FM部分 ==========
+        # FM一阶部分（分类特征）
+        self.fm_first_order_cat = nn.ModuleDict()
+        if self.has_categorical:
+            for col, num_embeddings in categorical_dims.items():
+                self.fm_first_order_cat[col] = nn.Embedding(num_embeddings, 1)
+
+        # FM一阶部分（数值特征）
+        if self.has_numeric:
+            self.fm_first_order_num = nn.Linear(numeric_dim, 1)
+
+        # FM二阶部分（分类特征）
+        self.fm_second_order = nn.ModuleDict()
+        if self.has_categorical:
+            for col, num_embeddings in categorical_dims.items():
+                self.fm_second_order[col] = nn.Embedding(num_embeddings, embed_dim)
+
+        # ========== DNN部分 ==========
+        # DNN嵌入层（分类特征）
+        self.dnn_embeddings = nn.ModuleDict()
+        if self.has_categorical:
+            for col, num_embeddings in categorical_dims.items():
+                self.dnn_embeddings[col] = nn.Embedding(num_embeddings, embed_dim)
+
+        # DNN数值特征处理
+        if self.has_numeric:
+            self.numeric_layer = nn.Linear(numeric_dim, embed_dim)
+
+        # DNN全连接层
+        input_dim = embed_dim * len(categorical_dims) + (embed_dim if self.has_numeric else 0)
+        layers = []
+        for i, out_dim in enumerate(mlp_layers):
+            layers.append(nn.Linear(input_dim, out_dim))
+            layers.append(nn.BatchNorm1d(out_dim))  # 添加批归一化
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+            input_dim = out_dim
+
+        self.dnn = nn.Sequential(*layers) if layers else nn.Identity()
+
+        # 输出层
+        # FM部分输出维度: 一阶(1) + 二阶(1)
+        fm_output_dim = 2 if self.has_categorical else 1
+        # DNN部分输出维度
+        dnn_output_dim = mlp_layers[-1] if mlp_layers else 0
+        # 合并输出层
+        self.output_layer = nn.Linear(fm_output_dim + dnn_output_dim, 1)
+
+    def forward(self, numeric, categorical):
+        batch_size = numeric.shape[0] if self.has_numeric else categorical.shape[0]
+        components = []
+
+        # ========== FM部分 ==========
+        # 一阶特征
+        fm_first_total = torch.zeros(batch_size, 1, device=numeric.device if self.has_numeric else categorical.device)
+
+        # 分类特征一阶项
+        fm_first_cat_list = []
+        for i, col in enumerate(self.fm_first_order_cat):
+            # 输入形状: [batch_size] -> 输出形状: [batch_size, 1]
+            emb = self.fm_first_order_cat[col](categorical[:, i])
+            fm_first_cat_list.append(emb)
+
+        # 拼接所有嵌入: [batch_size, num_cat_features]
+        fm_first_cat = torch.cat(fm_first_cat_list, dim=1)
+        # 求和: [batch_size, 1]
+        fm_first_cat = fm_first_cat.sum(dim=1, keepdim=True)
+        fm_first_total += fm_first_cat
+
+        # 数值特征一阶项
+        if self.has_numeric:
+            fm_first_num = self.fm_first_order_num(numeric).view(-1, 1)
+            fm_first_total += fm_first_num
+
+        components.append(fm_first_total)
+
+        # 二阶特征
+        if self.has_categorical:
+            fm_second_embeds = torch.cat([
+                self.fm_second_order[col](categorical[:, i])
+                for i, col in enumerate(self.fm_second_order)
+            ], dim=1)  # (batch_size, embed_dim * num_cat_features)
+
+            # FM二阶计算
+            square_of_sum = torch.sum(fm_second_embeds, dim=1).pow(2)
+            sum_of_square = torch.sum(fm_second_embeds.pow(2), dim=1)
+            fm_second_order = 0.5 * (square_of_sum - sum_of_square).unsqueeze(1)
+            components.append(fm_second_order)
+
+        # ========== DNN部分 ==========
+        dnn_embeds = []
+
+        # 分类特征嵌入
+        if self.has_categorical:
+            dnn_embeds.extend([
+                self.dnn_embeddings[col](categorical[:, i])
+                for i, col in enumerate(self.dnn_embeddings)
+            ])
+
+        # 数值特征嵌入
+        if self.has_numeric:
+            numeric_embed = self.numeric_layer(numeric)
+            dnn_embeds.append(numeric_embed)
+
+        if dnn_embeds:
+            dnn_input = torch.cat(dnn_embeds, dim=1)
+            dnn_output = self.dnn(dnn_input)
+            components.append(dnn_output)
+
+        # 合并所有部分
+        total = torch.cat(components, dim=1)
+
+        # 最终输出
+        output = self.output_layer(total)
+        return torch.sigmoid(output).squeeze(1)
+
+
+# DeepFM训练器
+class DeepFMTrainer:
+    def __init__(self, model, train_loader, val_loader, test_loader, optimizer, device='cpu'):
+        self.model = model.to(device)
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.test_loader = test_loader
+        self.optimizer = optimizer
+        self.device = device
+
+        # 训练跟踪
+        self.best_auc = 0
+        self.best_model_state = None
+        self.best_model = None  # 保存完整的最佳模型
+        self.best_threshold = CONFIG["positive_threshold"]
+        self.train_metrics_history = []  # 存储训练指标历史
+        self.val_metrics_history = []  # 存储验证指标历史
+        self.train_loss_history = []  # 存储训练损失历史
+        self.test_confusion_matrix = None  # 存储测试混淆矩阵
+
+    def train(self, class_weight=None):
+        """训练模型"""
+        # 定义损失函数（带或不带权重）
+        if class_weight is not None:
+            class_weight_tensor = torch.tensor([class_weight[0], class_weight[1]],
+                                               dtype=torch.float).to(self.device)
+            criterion = nn.BCEWithLogitsLoss(pos_weight=class_weight_tensor[1])
+        else:
+            criterion = nn.BCEWithLogitsLoss()
+
+        # 学习率调度器
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer,
+            mode='max',
+            factor=0.7,
+            patience=3,
+            min_lr=1e-5,
+            verbose=True
+        )
+
+        # 创建结果目录用于保存检查点
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        results_dir = f"results_{timestamp}"
+        os.makedirs(results_dir, exist_ok=True)
+
+        for epoch in range(CONFIG["epochs"]):
+            # 获取并打印当前学习率
+            current_lr = self.optimizer.param_groups[0]['lr']
+            print(f"\nEpoch {epoch + 1}/{CONFIG['epochs']}, 学习率: {current_lr:.6f}")
+
+            start_time = time.time()
+            self.model.train()
+            total_loss, total_samples = 0, 0
+            train_y_true, train_y_pred_proba = [], []
+            epoch_grad_norms = []
+
+            for batch in self.train_loader:
+                numeric = batch['numeric'].to(self.device)
+                categorical = batch['categorical'].to(self.device)
+                labels = batch['label'].to(self.device)
+
+                self.optimizer.zero_grad()
+                logits = self.model(numeric, categorical)  # 获取sigmoid前的logits
+                loss = criterion(logits, labels)
+                loss.backward()
+                self.optimizer.step()
+
+                total_loss += loss.item() * numeric.size(0)
+                total_samples += numeric.size(0)
+
+                # 计算梯度范数
+                total_norm = 0
+                for p in self.model.parameters():
+                    if p.grad is not None:
+                        param_norm = p.grad.data.norm(2)
+                        total_norm += param_norm.item() ** 2
+                total_norm = total_norm ** (0.5)
+                epoch_grad_norms.append(total_norm)
+
+                # 收集训练预测
+                with torch.no_grad():
+                    train_y_true.extend(labels.cpu().numpy())
+                    train_y_pred_proba.extend(logits.cpu().numpy())
+
+            # 打印 epoch 结束时的平均梯度范数
+            avg_grad_norm = sum(epoch_grad_norms) / len(epoch_grad_norms)
+            min_grad_norm = min(epoch_grad_norms)
+            max_grad_norm = max(epoch_grad_norms)
+            print(f"Epoch {epoch + 1} - 梯度范数: 平均={avg_grad_norm:.4f}, "
+                  f"最小={min_grad_norm:.4f}, 最大={max_grad_norm:.4f}")
+
+            avg_loss = total_loss / total_samples
+            self.train_loss_history.append(avg_loss)
+
+            train_metrics = calculate_detailed_metrics(
+                np.array(train_y_true),
+                np.array(train_y_pred_proba),
+                threshold=self.best_threshold
+            )
+            self.train_metrics_history.append(train_metrics)
+
+            epoch_time = time.time() - start_time
+            print(f"Epoch {epoch + 1}/{CONFIG['epochs']}, 训练损失: {avg_loss:.4f}, 时间: {epoch_time:.2f}s")
+            print_detailed_metrics(train_metrics, "训练")
+
+            # 验证并保存最佳模型
+            val_metrics, threshold = self.validate()
+            self.val_metrics_history.append(val_metrics)
+            scheduler.step(val_metrics["overall"]["auc_pr"])
+
+            # 保存检查点（如果配置了）
+            if CONFIG["save_checkpoints"] and (epoch + 1) % CONFIG["checkpoint_interval"] == 0:
+                save_checkpoint(self.model, self.optimizer, epoch + 1, val_metrics, results_dir, CONFIG)
+
+            # 保存最佳模型
+            if val_metrics["overall"]["auc_pr"] > self.best_auc:
+                self.best_auc = val_metrics["overall"]["auc_pr"]
+                self.best_model_state = self.model.state_dict()
+                if CONFIG["save_full_model"]:
+                    # 保存完整模型的副本
+                    self.best_model = DeepFM(
+                        numeric_dim=self.model.numeric_dim if hasattr(self.model, 'numeric_dim') else 0,
+                        categorical_dims=self.model.categorical_dims if hasattr(self.model, 'categorical_dims') else {},
+                        embed_dim=self.model.embed_dim if hasattr(self.model, 'embed_dim') else 32,
+                        mlp_layers=self.model.mlp_layers if hasattr(self.model, 'mlp_layers') else [256, 128, 64],
+                        dropout=self.model.dropout if hasattr(self.model, 'dropout') else 0.3
+                    )
+                    self.best_model.load_state_dict(self.model.state_dict())
+                    self.best_model.to(self.device)
+                self.best_threshold = threshold
+                print(f"新的最佳AUC-PR: {self.best_auc:.4f}, 阈值: {threshold:.4f}")
+
+        print(f"训练完成. 最佳AUC-PR: {self.best_auc:.4f}, 最佳阈值: {self.best_threshold:.4f}")
+        return self.best_threshold, results_dir
+
+    def validate(self):
+        """在验证集上评估"""
+        self.model.eval()
+        y_true, y_pred_proba = [], []
+
+        with torch.no_grad():
+            for batch in self.val_loader:
+                numeric = batch['numeric'].to(self.device)
+                categorical = batch['categorical'].to(self.device)
+                labels = batch['label'].to(self.device)
+                outputs = self.model(numeric, categorical)
+                y_true.extend(labels.cpu().numpy())
+                y_pred_proba.extend(outputs.cpu().numpy())
+
+        # 使用最佳阈值计算指标
+        if CONFIG["threshold_tuning"]:
+            threshold = self.find_optimal_threshold(y_true, y_pred_proba)
+        else:
+            threshold = CONFIG["positive_threshold"]
+
+        y_true = np.array(y_true)
+        y_pred_proba = np.array(y_pred_proba)
+        metrics = calculate_detailed_metrics(y_true, y_pred_proba, threshold)
+        print_detailed_metrics(metrics, "验证")
+        return metrics, threshold
+
+    def test(self):
+        """在测试集上评估"""
+        if self.best_model_state is not None:
+            self.model.load_state_dict(self.best_model_state)
+
+        self.model.eval()
+        y_true, y_pred_proba = [], []
+
+        with torch.no_grad():
+            for batch in self.test_loader:
+                numeric = batch['numeric'].to(self.device)
+                categorical = batch['categorical'].to(self.device)
+                labels = batch['label'].to(self.device)
+                outputs = self.model(numeric, categorical)
+                y_true.extend(labels.cpu().numpy())
+                y_pred_proba.extend(outputs.cpu().numpy())
+
+        # 使用训练中的最佳阈值
+        if CONFIG["threshold_tuning"]:
+            threshold = self.best_threshold
+        else:
+            threshold = CONFIG["positive_threshold"]
+
+        y_true = np.array(y_true)
+        y_pred_proba = np.array(y_pred_proba)
+        metrics = calculate_detailed_metrics(y_true, y_pred_proba, threshold)
+        print_detailed_metrics(metrics, "测试")
+
+        # 绘制混淆矩阵
+        self.test_confusion_matrix = self.plot_confusion_matrix(y_true, np.array(y_pred_proba) >= threshold)
+        return metrics
+
+    def find_optimal_threshold(self, y_true, y_pred_proba):
+        """基于验证集找到最佳阈值"""
+        precision, recall, thresholds = precision_recall_curve(y_true, y_pred_proba)
+
+        if CONFIG["optimize_for"] == "recall":
+            # 最大化召回率同时保持合理的精确率
+            optimal_idx = np.argmax(recall[:-1])
+        elif CONFIG["optimize_for"] == "precision":
+            # 最大化精确率同时保持合理的召回率
+            optimal_idx = np.argmax(precision[:-1])
+        else:  # 默认优化F1分数
+            f1_scores = 2 * (precision * recall) / (precision + recall + 1e-8)
+            optimal_idx = np.argmax(f1_scores[:-1])
+
+        threshold = thresholds[optimal_idx]
+        return threshold
+
+    def plot_confusion_matrix(self, y_true, y_pred, normalize=False):
+        """绘制混淆矩阵"""
+        cm = confusion_matrix(y_true, y_pred)
+        if normalize:
+            cm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+            fmt = '.2f'
+        else:
+            fmt = 'd'
+
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(cm, annot=True, fmt=fmt, cmap='Blues',
+                    xticklabels=['负样本', '正样本'],
+                    yticklabels=['负样本', '正样本'])
+        plt.title('混淆矩阵')
+        plt.xlabel('预测标签')
+        plt.ylabel('真实标签')
+        plt.tight_layout()
+        plt.savefig('confusion_matrix.png', dpi=300)
+        plt.close()
+        return cm
+
+
+# 主程序
+def main():
+    # 加载数据
+    print(f"从文件夹加载数据: {CONFIG['data_folder']}")
+    df = load_data_from_folder(CONFIG["data_folder"])
+    label_col = CONFIG["label_col"]
+    numeric_features = CONFIG["numeric_features"]
+    categorical_features = CONFIG["categorical_features"]
+
+    # 确保标签列存在
+    if label_col not in df.columns:
+        raise ValueError(f"在数据中未找到标签列 '{label_col}'")
+
+    # 打印初始数据分布
+    original_class_dist = Counter(df[label_col])
+    print("\n" + "=" * 70)
+    print("原始数据分布".center(70))
+    print("=" * 70)
+    print(f"正样本 (1): {original_class_dist[1]} 个")
+    print(f"负样本 (0): {original_class_dist[0]} 个")
+    print(f"不平衡比例: {original_class_dist[0] / original_class_dist[1]:.1f}:1")
+    print("=" * 70 + "\n")
+
+    # 处理不平衡（在分割数据集之前）
+    imbalance_method = CONFIG["imbalance_method"]
+    class_weights = None
+
+    if imbalance_method == "undersample":
+        print("对整个数据集应用下采样...")
+        df = undersample_data(df, label_col, CONFIG["undersample_ratio"])
+    elif imbalance_method == "both":
+        # 对整个数据集下采样
+        print("对整个数据集应用下采样...")
+        df = undersample_data(df, label_col, CONFIG["undersample_ratio"])
+        # 计算损失函数的类别权重
+        class_counts = df[label_col].value_counts()
+        class_weights = [class_counts.sum() / (2.0 * class_counts[0]),
+                         class_counts.sum() / (2.0 * class_counts[1])]
+    elif imbalance_method == "weight":
+        # 只使用权重处理
+        class_counts = df[label_col].value_counts()
+        class_weights = [class_counts.sum() / (2.0 * class_counts[0]),
+                         class_counts.sum() / (2.0 * class_counts[1])]
+        print(f"使用类别权重: 负样本={class_weights[0]:.2f}, 正样本={class_weights[1]:.2f}")
+
+    # 打印处理后的数据分布
+    processed_class_dist = Counter(df[label_col])
+    print("\n" + "=" * 70)
+    print("处理后的数据分布".center(70))
+    print("=" * 70)
+    print(f"正样本 (1): {processed_class_dist[1]} 个")
+    print(f"负样本 (0): {processed_class_dist[0]} 个")
+    print(f"不平衡比例: {processed_class_dist[0] / processed_class_dist[1]:.1f}:1")
+    print("=" * 70 + "\n")
+
+    # 分割数据集（使用分层抽样确保每个集合中都有正样本）
+    test_size = CONFIG["test_size"]
+    val_size = CONFIG["val_size"]
+    min_pos_samples = CONFIG["min_pos_samples"]
+
+    # 确保每个集合有足够的正样本
+    if processed_class_dist[1] < min_pos_samples * 3:
+        min_pos_samples = max(5, processed_class_dist[1] // 3)
+        print(f"由于正样本有限，将min_pos_samples调整为 {min_pos_samples}")
+
+    # 首先生成测试集
+    train_val_df, test_df = train_test_split(
+        df,
+        test_size=test_size,
+        stratify=df[label_col],
+        random_state=42
+    )
+
+    # 检查测试集正样本数量
+    test_pos_count = test_df[label_col].sum()
+    if test_pos_count < min_pos_samples:
+        print(f"警告: 测试集只有 {test_pos_count} 个正样本。调整分割...")
+        # 重新分割以确保测试集有足够的正样本
+        train_val_df, test_df = train_test_split(
+            df,
+            test_size=min(min_pos_samples / len(df), test_size),
+            stratify=df[label_col],
+            random_state=42
+        )
+
+    # 然后从剩余数据生成验证集
+    train_df, val_df = train_test_split(
+        train_val_df,
+        test_size=val_size,
+        stratify=train_val_df[label_col],
+        random_state=42
+    )
+
+    # 检查验证集正样本数量
+    val_pos_count = val_df[label_col].sum()
+    if val_pos_count < min_pos_samples:
+        print(f"警告: 验证集只有 {val_pos_count} 个正样本。调整分割...")
+        # 重新分割以确保验证集有足够的正样本
+        train_df, val_df = train_test_split(
+            train_val_df,
+            test_size=min(min_pos_samples / len(train_val_df), val_size),
+            stratify=train_val_df[label_col],
+            random_state=42
+        )
+
+    # 打印最终数据集分布
+    print("\n最终数据集分布:")
+    print(f"训练集: {len(train_df)} 样本 ({train_df[label_col].sum()} 正样本)")
+    print(f"验证集: {len(val_df)} 样本 ({val_df[label_col].sum()} 正样本)")
+    print(f"测试集: {len(test_df)} 样本 ({test_df[label_col].sum()} 正样本)")
+
+    # 创建数据集
+    train_dataset = DeepFMDataset(
+        train_df,
+        numeric_features,
+        categorical_features,
+        label_col
+    )
+    encoders = train_dataset.categorical_encoders
+
+    val_dataset = DeepFMDataset(
+        val_df,
+        numeric_features,
+        categorical_features,
+        label_col,
+        encoders=encoders,
+        is_train=False
+    )
+
+    test_dataset = DeepFMDataset(
+        test_df,
+        numeric_features,
+        categorical_features,
+        label_col,
+        encoders=encoders,
+        is_train=False
+    )
+
+    # 创建数据加载器
+    train_loader = DataLoader(train_dataset, batch_size=CONFIG["batch_size"], shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=CONFIG["batch_size"])
+    test_loader = DataLoader(test_dataset, batch_size=CONFIG["batch_size"])
+
+    # 初始化模型
+    numeric_dim = len(numeric_features)
+    categorical_dims = train_dataset.categorical_dims
+
+    # 为模型添加配置参数属性，以便保存完整模型时使用
+    model = DeepFM(
+        numeric_dim=numeric_dim,
+        categorical_dims=categorical_dims,
+        embed_dim=CONFIG["embed_dim"],
+        mlp_layers=CONFIG["mlp_layers"],
+        dropout=CONFIG["dropout"]
+    )
+    # 保存模型配置参数
+    model.numeric_dim = numeric_dim
+    model.categorical_dims = categorical_dims
+    model.embed_dim = CONFIG["embed_dim"]
+    model.mlp_layers = CONFIG["mlp_layers"]
+    model.dropout = CONFIG["dropout"]
+
+    # 打印模型信息
+    print("\n模型结构:")
+    print(model)
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"可训练参数: {total_params:,}")
+
+    # 定义优化器
+    optimizer = optim.AdamW(
+        model.parameters(),
+        lr=CONFIG["learning_rate"],
+        weight_decay=CONFIG["weight_decay"]
+    )
+
+    # 检测并使用GPU（如果可用）
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"\n使用设备: {device}")
+
+    # 创建训练器
+    trainer = DeepFMTrainer(
+        model,
+        train_loader,
+        val_loader,
+        test_loader,
+        optimizer,
+        device=device
+    )
+
+    # 训练模型
+    best_threshold, results_dir = trainer.train(class_weight=class_weights)
+
+    # 测试集评估
+    test_metrics = trainer.test()
+    print("训练和评估成功完成!")
+
+    # 保存结果
+    results_dir = save_results(trainer, CONFIG, test_metrics, results_dir)
+    print(f"所有结果已保存到: {results_dir}")
+
+
+if __name__ == "__main__":
+    main()
